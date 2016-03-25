@@ -33,6 +33,15 @@ geoDX <- ncdf4::ncatt_get(ncid,varid=0,'DX')$value
 ncdf4::nc_close(ncid)
 hydDX <- geoDX/aggfact
 
+if (readEnsemble) {
+	numEns <- length(ensembleList)
+	# Expand modPathList to number of ensembles
+	modPathList <- expandModPathList(numEns,ensembleList,length(modPathList),modPathList)
+	modTagList <- expandModTagList(numEns,length(modPathList),modTagList)
+	ensTagList <- expandEnsTagList(numEns,length(modPathList),modPathList,ensembleList)
+} else {
+	numEns <- 1
+}
 
 ## ------------------------------------------------------------------------
 ## ------------------------------------------------------------------------
@@ -47,6 +56,7 @@ if ((readMod & readBasinLdasout) | (readForc & readBasinLdasin)) {
  	basgeoIndex_Lev2 <- list()
  	basgeoIndex_Lev3 <- list()
  	basgeoIndex_Lev4 <- list()
+        basgeoIndex_sweSum <- list()
  	for (i in 1:length(mskgeo.nameList)) {
    		basgeoIndex_Lev0[[as.character(mskgeo.nameList[[i]])]] <- list(start=c(mskgeo.minInds$x[i], mskgeo.minInds$y[i], 1),
                                                end=c(mskgeo.maxInds$x[i], mskgeo.maxInds$y[i], 1), stat='basin_avg', arg=list(mskvar=mskgeo.List[[i]]))
@@ -58,7 +68,9 @@ if ((readMod & readBasinLdasout) | (readForc & readBasinLdasin)) {
                                                end=c(mskgeo.maxInds$x[i], 3, mskgeo.maxInds$y[i], 1), stat='basin_avg', arg=list(mskvar=mskgeo.List[[i]]))
    		basgeoIndex_Lev4[[as.character(mskgeo.nameList[[i]])]] <- list(start=c(mskgeo.minInds$x[i], 4, mskgeo.minInds$y[i], 1),
                                                end=c(mskgeo.maxInds$x[i], 4, mskgeo.maxInds$y[i], 1), stat='basin_avg', arg=list(mskvar=mskgeo.List[[i]]))
- 		}
+ 		basgeoIndex_sweSum[[as.character(mskgeo.nameList[[i]])]] <- list(start=c(mskgeo.minInds$x[i], mskgeo.minInds$y[i], 1),
+                                               end=c(mskgeo.maxInds$x[i], mskgeo.maxInds$y[i], 1), stat='basin_sum_swe', arg=list(mskvar=mskgeo.List[[i]],res=resMod))
+		}
  	}
 
 if (readMod & readBasinRtout) {
@@ -197,6 +209,7 @@ if (readMod & readBasinRtout) {
          	modRtout <- ReshapeMultiNcdf(rtoutDF)
          	modRtout <- modRtout[order(modRtout$statArg, modRtout$POSIXct),]
 	 	modRtout$tag <- modoutTag
+		modRtout$ensTag <- ensoutTag
 	 	modRtout_BAS_tmp <- plyr::rbind.fill(modRtout_BAS_tmp, modRtout)
          	rm(rtoutDF, modRtout, filesList, rtoutFilesList)
  	 	gc()
@@ -226,13 +239,13 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                         'SFCRNOFF', 'CANLIQ', 'CANICE', 'ACCPRCP',
 			'ACCECAN', 'ACCEDIR', 'TRAD',
                          rep('SOIL_M',4),
-                        'SNOWH', 'SNEQV')
+                        'SNOWH', 'SNEQV','SNEQV')
                 varLabels <- c('SWFORC', 'LWFORC', 'ALBEDO', 'GRDFLX',
                         'LH', 'HFX', 'ACCETRAN', 'UGDRNOFF',
                         'SFCRNOFF', 'CANLIQ', 'CANICE', 'ACCPRCP',
                         'ACCECAN', 'ACCEDIR', 'TRAD',
                          paste0('SOIL_M',1:4),
-                        'SNOWH', 'SNEQV')
+                        'SNOWH', 'SNEQV','SNEQV_SUM')
                 ldasoutVars <- as.list( varNames )
                 names(ldasoutVars) <- varLabels
                 #ldasoutVariableList <- list( ldasout = ldasoutVars )
@@ -243,12 +256,13 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                         level2 <- get(paste0(pref, "Index_Lev2"))
                         level3 <- get(paste0(pref, "Index_Lev3"))
                         level4 <- get(paste0(pref, "Index_Lev4"))
+                        levelSum <- get(paste0(pref,"Index_sweSum"))
                         ldasoutInd <- list( level0, level0, level0, level0,
                                         level0, level0, level0, level0,
                                         level0, level0, level0, level0,
 					level0, level0, level0,
                                         level1, level2, level3, level4,
-                                        level0, level0 )
+                                        level0, level0, levelSum )
                         names(ldasoutInd) <- names(ldasoutVars.)
                         #ldasoutIndexList <- list( ldasout = ldasoutInd )
                         ldasoutInd
@@ -270,7 +284,7 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
  			rep('SNOW_T', 3),
 			rep('SOILICE', 4),
 			'SOILSAT1', 'SOILSAT',
- 			'FSNO', 'SNOWH', 'SNEQV')
+ 			'FSNO', 'SNOWH', 'SNEQV','SNEQV')
  		varLabels <- c('ALBEDO', 'GRDFLX', 'LH', 'HFX',            
                         'FIRA', 'FSA', 'TRAD', 'UGDRNOFF',
                         'SFCRNOFF','CANLIQ', 'CANICE', 'ACCPRCP',
@@ -283,7 +297,7 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                         paste0('SNOW_T', 1:3),
 			paste0('SOILICE', 1:4),
 			'SOILSAT1', 'SOILSAT',
-                        'FSNO', 'SNOWH', 'SNEQV')
+                        'FSNO', 'SNOWH', 'SNEQV','SNEQV_SUM')
  		ldasoutVars <- as.list( varNames )
  		names(ldasoutVars) <- varLabels
  		#ldasoutVariableList <- list( ldasout = ldasoutVars )
@@ -294,6 +308,7 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
 			level2 <- get(paste0(pref, "Index_Lev2"))
 			level3 <- get(paste0(pref, "Index_Lev3"))
 			level4 <- get(paste0(pref, "Index_Lev4"))
+			levelSum <- get(paste0(pref,"Index_sweSum"))
 			ldasoutInd <- list( level0, level0, level0, level0,
                                         level0, level0, level0, level0,
                                         level0, level0, level0, level0,
@@ -306,11 +321,29 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
 					level1, level2, level3,
 					level1, level2, level3, level4,
 					level0, level0, 
-                                        level0, level0, level0 )
+                                        level0, level0, level0, levelSum )
                         names(ldasoutInd) <- names(ldasoutVars.)
                         #ldasoutIndexList <- list( ldasout = ldasoutInd )
 			ldasoutInd
 		}
+
+	} else if (varsLdasoutSNOW) {
+		varNames <- c('SNEQV','SNOWH','SNEQV')
+		varLabels <- c('SNEQV','SNOWH','SNEQV_SUM')
+		ldasoutVars <- as.list( varNames )
+		names(ldasoutVars) <- varLabels
+		genIndex_Ldasout <- function(pref, ldasoutVars.=ldasoutVars) {
+                        level0 <- get(paste0(pref, "Index_Lev0"))
+                        level1 <- get(paste0(pref, "Index_Lev1"))
+                        level2 <- get(paste0(pref, "Index_Lev2"))
+                        level3 <- get(paste0(pref, "Index_Lev3"))
+                        level4 <- get(paste0(pref, "Index_Lev4"))
+			levelSum <- get(paste0(pref,"Index_sweSum"))
+                        ldasoutInd <- list( level0, level0, levelSum)
+		names(ldasoutInd) <- names(ldasoutVars.)
+                #ldasoutIndexList <- list( ldasout = ldasoutInd )
+                ldasoutInd
+                }
 
         } else if (varsLdasoutIOC0) {
                 # SUBSET
@@ -322,7 +355,8 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
 			rep('SOIL_M', 4),
 			'SNOWH', 'SNEQV', 'ISNOW', 'FSNO',
 			'ACSNOM', 'ACCET', 'CANWAT', 'SOILICE',
-			'SOILSAT_TOP', 'SOILSAT', 'SNOWT_AVG')
+			'SOILSAT_TOP', 'SOILSAT', 'SNOWT_AVG',
+                        'SNEQV')
                 varLabels <- c('FSA', 'FIRA', 'GRDFLX', 'HFX',
                         'LH', 'UGDRNOFF', 'SFCRNOFF', 'ACCECAN',
                         'ACCEDIR','ACCETRAN', 'TRAD', 
@@ -331,7 +365,8 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                         paste0('SOIL_M', 1:4),
                         'SNOWH', 'SNEQV', 'ISNOW', 'FSNO',
                         'ACSNOM', 'ACCET', 'CANWAT', 'SOILICE',
-                        'SOILSAT_TOP', 'SOILSAT', 'SNOWT_AVG')
+                        'SOILSAT_TOP', 'SOILSAT', 'SNOWT_AVG',
+                        'SNEQV_SUM')
                 ldasoutVars <- as.list( varNames )
                 names(ldasoutVars) <- varLabels
                 #ldasoutVariableList <- list( ldasout = ldasoutVars )
@@ -342,6 +377,7 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                         level2 <- get(paste0(pref, "Index_Lev2"))
                         level3 <- get(paste0(pref, "Index_Lev3"))
                         level4 <- get(paste0(pref, "Index_Lev4"))
+                        levelSum <- get(paste0(pref,"Index_sweSum"))
                         ldasoutInd <- list( level0, level0, level0, level0,
                                         level0, level0, level0, level0,
                                         level0, level0, level0,
@@ -350,7 +386,8 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                                         level1, level2, level3, level4,
 					level0, level0, level0, level0,
 					level0, level0, level0, level0,
-					level0, level0, level0)
+					level0, level0, level0,
+                                        levelSum)
                         names(ldasoutInd) <- names(ldasoutVars.)
                         #ldasoutIndexList <- list( ldasout = ldasoutInd )
                         ldasoutInd
@@ -375,7 +412,7 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                          'STBLCP', 'STMASS', 'SWFORC', 'T2MB', 'T2MV', 'TAH', 'TG', 'TGB', 'TGV', 'TR',
                          'TRAD', 'TV', 'UGDRNOFF', 'WA', 'WOOD', 'WT', 
                          rep('ZSNSO_SN',3), 
-                         'ZWT')
+                         'ZWT', 'SNEQV')
  		varLabels <- c('ACCECAN', 'ACCEDIR', 'ACCETRAN', 'ACCPRCP', 'ACSNOM', 'ACSNOW', 'ALBEDO', 'APAR', 'CANICE', 'CANLIQ',
                          'CH', 'CHB', 'CHB2', 'CHLEAF', 'CHUC', 'CHV', 'CHV2', 'CM', 'COSZ', 'EAH', 
                          'ECAN', 'EDIR', 'EMISS', 'ETRAN', 'EVB', 'EVC', 'EVG', 'FASTCP', 'FIRA', 'FSA', 
@@ -393,7 +430,7 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                          'STBLCP', 'STMASS', 'SWFORC', 'T2MB', 'T2MV', 'TAH', 'TG', 'TGB', 'TGV', 'TR',
                          'TRAD', 'TV', 'UGDRNOFF', 'WA', 'WOOD', 'WT',
                          paste0('ZSNSO_SN',1:3),
-                         'ZWT')
+                         'ZWT', 'SNEQV_SUM')
          	ldasoutVars <- as.list( varNames )
          	names(ldasoutVars) <- varLabels
          	#ldasoutVariableList <- list( ldasout = ldasoutVars )
@@ -404,6 +441,7 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                         level0 <- get(paste0(pref, "Index_Lev0"))
                         level0 <- get(paste0(pref, "Index_Lev0"))
                         level0 <- get(paste0(pref, "Index_Lev0"))
+                        levelSum <- get(paste0(pref,"Index_sweSum"))
                         ldasoutInd <- list( level0, level0, level0, level0, level0, level0, level0, level0, level0, level0,
                                      level0, level0, level0, level0, level0, level0, level0, level0, level0, level0,
                                      level0, level0, level0, level0, level0, level0, level0, level0, level0, level0,
@@ -421,7 +459,7 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                                      level0, level0, level0, level0, level0, level0, level0, level0, level0, level0,
                                      level0, level0, level0, level0, level0, level0,
                                      level1, level2, level3,
-                                     level0 )
+                                     level0, levelSum )
                         names(ldasoutInd) <- names(ldasoutVars.)
                         #ldasoutIndexList <- list( ldasout = ldasoutInd )
 			ldasoutInd
@@ -465,6 +503,11 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
         for (i in 1:length(modPathList)) {
         	modoutPath <- modPathList[i]
                 modoutTag <- modTagList[i]
+		if (numEns > 1) {
+                        ensoutTag <- ensTagList[i]
+                } else {
+                        ensoutTag <- modoutTag
+                }
                 # Setup LDASOUT files
                 filesList <- list.files(path=modoutPath, pattern=glob2rx('*.LDASOUT_DOMAIN*'), full.names=TRUE)
 		if (!is.null(readModStart) | !is.null(readModEnd)) {
@@ -499,9 +542,10 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
 				modLdasout$TurbNet <- with(modLdasout, LH+HFX) }
 			# Data mgmt
                         modLdasout$tag <- modoutTag
+			modLdasout$enstag <- ensoutTag
 			modLdasout$fileGroup <- j
 			modLdasout <- data.table(modLdasout)
-			setkey(modLdasout, tag, fileGroup, statArg, POSIXct)
+			setkey(modLdasout, tag, enstag, fileGroup, statArg, POSIXct)
 			message("LDASOUT: Starting daily aggregations")
                         ## ------------------------------------------------------------------------
                         # Calculate daily values
@@ -518,6 +562,9 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
 			if (varsLdasoutIOC0) {
                         	modLdasout.snoday <- modLdasout[, list(SNEQV_last=tail(SNEQV,1), SNOWH_last=tail(SNOWH,1)), 
 							by = "statArg,PST_dateP1"]
+			} else if (varsLdasoutSNOW) {
+				modLdasout.snoday <- modLdasout[, list(SNEQV_last=tail(SNEQV,1), SNOWH_last=tail(SNOWH,1)),
+                                                        by = "statArg,PST_dateP1"]
 			} else {
 				modLdasout.snoday <- modLdasout[, list(DEL_ACCPRCP=sum(DEL_ACCPRCP), SNEQV_last=tail(SNEQV,1), SNOWH_last=tail(SNOWH,1)), 
 								by = "statArg,PST_dateP1"]
@@ -563,6 +610,15 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
                                          LH_mean=mean(LH_mean), HFX_mean=mean(HFX_mean), GRDFLX_mean=mean(GRDFLX_mean),
                                          FIRA_mean=mean(FIRA_mean), FSA_mean=mean(FSA_mean)),
                                          by = "statArg,UTC_month"]
+			} else if (varsLdasoutSNOW) {
+				modLdasout.utcday <- modLdasout[, list(SNEQV_mean=mean(SNEQV), SNOWH_mean=mean(SNOWH)),
+					 by = "statArg,UTC_date"]
+				mo <- as.integer(format(modLdasout.utcday$UTC_date, "%m"))
+                                yr <- as.integer(format(modLdasout.utcday$UTC_date, "%Y"))
+                                modLdasout.utcday$UTC_month <- as.Date(paste0(yr,"-",mo,"-15"), format="%Y-%m-%d")
+                                modLdasout.utcmonth <- modLdasout.utcday[, list(SNEQV_mean=mean(SNEQV_mean), 
+					SNOWH_mean=mean(SNOWH_mean)),
+					by = "statArg,UTC_month"]
 			} else if (varsLdasoutIOC0) {
 			        modLdasout.utcday <- modLdasout[, list(DEL_ACCEDIR=sum(DEL_ACCEDIR),
                                          DEL_ACCECAN=sum(DEL_ACCECAN), DEL_ACCETRAN=sum(DEL_ACCETRAN),
@@ -599,6 +655,9 @@ if (readMod & (readBasinLdasout | readAmfLdasout | readSnoLdasout | readMetLdaso
 			modLdasout.snoday$tag <- modoutTag
 			modLdasout.utcday$tag <- modoutTag
 			modLdasout.utcmonth$tag <- modoutTag
+			modLdasout.snoday$enstag <- ensoutTag
+			modLdasout.utcday$enstag <- ensoutTag
+			modLdasout.utcmonth$enstag <- ensoutTag
 			modLdasout.snoday$fileGroup <- j
 			modLdasout.utcday$fileGroup <- j
 			modLdasout.utcmonth$fileGroup <- j
@@ -675,8 +734,13 @@ if (readMod & readFrxstout) {
         for (i in 1:length(modPathList)) {
                 modoutPath <- modPathList[i]
                 modoutTag <- modTagList[i]
+		if (numEns > 1) {
+                        ensoutTag <- ensTagList[i]
+                } else {
+                        ensoutTag <- modoutTag 
+                }
                 # Read STR
-		if (reachRting) {
+		if (reachRting){ 
 			modFrxstout <- ReadFrxstPts(paste0(modoutPath, '/frxst_pts_out.txt'))
 		} else {
         		modFrxstout <- ReadFrxstPts(paste0(modoutPath, '/frxst_pts_out.txt'), stIdType='integer')
@@ -708,24 +772,32 @@ if (readMod & readFrxstout) {
 		names(modFrxstout)[names(modFrxstout)=="STAID"] <- "site_no"
   		# Calculate accumulated flow
   		modFrxstout$q_mm <- NA
+		modFrxstout$q_af <- NA
   		modFrxstout <- modFrxstout[order(modFrxstout$st_id, modFrxstout$POSIXct),]
   		modFrxstout$ACCFLOW <- NA
+		modFrxstout$ACCFLOW_af <- NA
   		for (j in unique(modFrxstout$site_no)[!is.na(unique(modFrxstout$site_no))]) {
     			tmp <- subset(modFrxstout, modFrxstout$site_no==j)
 			tmp$q_mm <- NA
+			tmp$q_af <- NA
 			for (k in 1:nrow(tmp)) {
 				ts <- ifelse(k==1, as.integer(difftime(tmp$POSIXct[k+1],tmp$POSIXct[k], units="secs")), 
 						as.integer(difftime(tmp$POSIXct[k],tmp$POSIXct[k-1], units="secs")))
                         	tmp$q_mm[k] <- tmp$q_cms[k]/
                                         (mskhyd.areaList[[j]]
                                         *hydDX*hydDX)*1000*ts
+				tmp$q_af[k] <- (tmp$q_cms[k]*ts)/1233.48
 			}
 			modFrxstout$q_mm[modFrxstout$site_no==j & !is.na(modFrxstout$site_no)] <- tmp$q_mm
+			modFrxstout$q_af[modFrxstout$site_no==j & !is.na(modFrxstout$site_no)] <- tmp$q_af
     			qaccum <- cumsum(tmp$q_mm)
+			qaccum_af <- cumsum(tmp$q_af)
     			modFrxstout$ACCFLOW[modFrxstout$site_no==j & !is.na(modFrxstout$site_no)] <- qaccum
+			modFrxstout$ACCFLOW_af[modFrxstout$site_no==j & !is.na(modFrxstout$site_no)] <- qaccum_af
   		}
 		# Add model run tag and bind
                 modFrxstout$tag <- modoutTag
+		modFrxstout$enstag <- ensoutTag
                 modFrxstout_tmp <- plyr::rbind.fill(modFrxstout_tmp, modFrxstout)
                 rm(modFrxstout)
                 gc()
@@ -1093,15 +1165,15 @@ if (readForc) {
 saveListMod <- unique(saveListMod)
 saveListForc <- unique(saveListForc)
 
-if ( (modReadFileOut == forcReadFileOut) & readMod & readForc ) {
-		saveListMod <- c(saveListMod, saveListForc)
-		save(list=saveListMod, file=modReadFileOut)
-} else {
+#if ( (modReadFileOut == forcReadFileOut) & readMod & readForc ) {
+#		saveListMod <- c(saveListMod, saveListForc)
+#		save(list=saveListMod, file=modReadFileOut)
+#} else {
 	if (readMod) save(list=saveListMod, file=modReadFileOut)
 	if (readForc) save(list=saveListForc, file=forcReadFileOut)
-}
-#file.remove(tmpRimg)
+#}
+file.remove(tmpRimg)
 
-stopCluster(cl)
+#stopCluster(cl)
 proc.time()
 

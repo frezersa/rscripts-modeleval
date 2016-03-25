@@ -7,6 +7,7 @@
 
 library(rwrfhydro)
 library(data.table)
+library(scales)
 
 load(maskFile)
 source("util_FUNC.R")
@@ -43,7 +44,7 @@ if (calcStats | createPlots) {
                 	stop(paste("MET obs file specified but does not exist:", METfile))
         	}
 	}
-	if (!is.null(STRfile) & (strProc | accflowPlot | hydroPlot | flowswePlot | flowlsmPlot) ) {
+	if (!is.null(STRfile) & (strProc | accflowPlot | hydroPlot | hydroEnsPlot| flowswePlot | flowlsmPlot) ) {
 		obsStrData_FINAL <- data.frame()
 		obsStrMeta_FINAL <- data.frame()
 		# Gridded routing case w/ subset
@@ -91,6 +92,20 @@ if (calcStats | createPlots) {
 	}
 }
 
+# Read in basin Snow/SNODAS
+if (readSnodas & readBasinSnodas) {
+        # Load necessary mask data to perform analysis
+        load(maskFile)
+        source("read_BASIN_SNOW.R")
+}
+
+# Read in point SNODAS
+if (readSnodas & (readSnoSnodas | readAmfSnodas | readMetSnodas)) {
+	# Load necessary mask data to perform reads
+	load(maskFile)
+	source("read_SNODAS.R")
+}
+
 # Stats Calculations
 if (calcStats & (strProc | snoProc | amfProc | metProc)) {
 	message("Calculating stats")
@@ -129,9 +144,17 @@ if (calcStats & (strProc | snoProc | amfProc | metProc)) {
 	source("calc_PERFSTATS.R")
 }
 
+# Basin snow analysis 
+if (calcStats & basSnoProc) {
+	# Load basin snow file 
+	load(snodasReadFileOut)
+	# Load model output (necessary for total accumulated streamflow).
+	source("calc_BASIN_SNOW.R")
+}
+
 # Plots
 if (createPlots) {
-	if (accflowPlot | hydroPlot | accprecipPlot | 
+	if (accflowPlot | hydroPlot | hydroEnsPlot | accprecipPlot | 
 			flowswePlot | flowlsmPlot | swePlot | 
 			strBiasMap | strCorrMap | 
 			snosweErrMap | snoprecipErrMap) {
@@ -155,6 +178,11 @@ if (createPlots) {
                 	}
         	}
 	}
+	if (basSnoEnsPlot) {
+		if (file.exists(modReadFileIn)) {
+			load(modReadFileIn)
+		}
+	}
 	if (metPlot) {
                 if (is.null(forcReadFileOut)) {
                         if (file.exists(forcReadFileIn)) {
@@ -172,6 +200,48 @@ if (createPlots) {
                         }
                 }
         }
+	if (snowBasinPlot) {
+		if (file.exists(snowBasDataFile)) {
+			load(snowBasDataFile)
+		}
+	}
+	if (snowPointScatter) {
+		# Load model data in for points
+		if (file.exists(modReadFileIn)){
+			load(modReadFileIn)
+		}
+
+		# Load necessary files for SNOTEL analysis
+		if (!is.null(SNOfile) & snotelScatter) {
+			if (file.exists(SNOfile)){
+				load(SNOfile)
+			}
+			if (file.exists(snodasSNOfile)){
+				load(snodasSNOfile)
+			}
+		}
+
+		# Load necessary files for Hydro-met analysis
+		if (metScatter) {
+			if (file.exists(METfile)) {
+				load(METfile)
+			}
+			if (file.exists(snodasMETfile)){
+				load(snodasMETfile)
+			}
+		}
+
+		# Load necessary files for basin-agreggation analysis
+		if (!is.null(SNOfile) & basinScatter){
+			if (file.exists(SNOfile)){
+				load(SNOfile)
+			}
+			if (file.exists(snodasSNOfile)){
+				load(snodasSNOfile)
+			}
+		}
+	}
+
         source("calc_PLOTS.R")
 }
 

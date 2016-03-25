@@ -22,6 +22,9 @@ maskFile <- '/glade/p/ral/RHAP/adugger/FRNG_MASTER_15Min_LONG_16Cores/DOMAIN/AD_
 ## Specify manual link2gage, if it exists
 link2gage.man <- data.frame(site_no=c("06721000","SVCPLACO","BIGLASCO","09058000"), link=c(225621,2890908,14962,1233053))
 
+## Temp directory to write intermediate files
+tmpDir <- '/glade/scratch/karsten'
+
 ################## Observations ###################
 
 ## Path to Ameriflux data .Rdata file
@@ -121,6 +124,45 @@ readForc <- FALSE
         readForcStart <- as.POSIXct("2013-01-01", format="%Y-%m-%d", tz="UTC")
         readForcEnd <- NULL
 
+############# SNODAS ################
+
+## Read SNODAS SWE data?
+readSnodas <- TRUE
+
+## If TRUE, specify the following:
+
+        # Specify path to the regridded SNODAS NetCDF data
+        snodasPathList <- c('/glade/p/work/karsten/conus_snodas/grids')
+
+        # Specify tags to identify SNODAS product
+        snodasTagList <- c('SNEQV')
+
+        # Specify the snodas analysis output .Rdata file to create
+        snodasReadFileOut <- '/glade/p/ral/RHAP/karsten/conus_ioc/analysis/output/conus_snodas_analysis.Rdata'
+
+         # Append to existing file? FALSE = create new file (or overwrite existing!)
+        forcAppend <- FALSE
+
+        # Specify resolution in km
+        resMod = 1.0
+
+        # Select what aggregations/imports to run:
+
+                # Basin means
+                readBasinSnodas <- FALSE
+
+                # SNOTEL sites
+                readSnoSnodas <- FALSE
+
+                # Ameriflux sites
+                readAmfSnodas <- FALSE
+
+                # MET sites
+                readMetSnodas <- FALSE
+
+        # Specify start and end dates if you do NOT want to read all files
+        readSnodasStart <- as.POSIXct("2010-01-01", format="%Y-%m-%d", tz="UTC")
+        readSnodasEnd <- as.POSIXct("2010-12-31", format="%Y-%m-%d", tz="UTC")
 
 ############# Model Performance Stats #############
 

@@ -18,6 +18,8 @@ lineWd <- 2
 # Get needed geo info
 ncid <- ncdf4::nc_open(geoFile)
 geoDX <- ncdf4::ncatt_get(ncid,varid=0,'DX')$value
+geoNX <- ncdf4::ncatt_get(ncid,varid=0,'WEST-EAST_PATCH_END_UNSTAG')$value
+geoNY <- ncdf4::ncatt_get(ncid,varid=0,'SOUTH-NORTH_PATCH_END_UNSTAG')$value
 ncdf4::nc_close(ncid)
 hydDX <- geoDX/aggfact
 
@@ -180,6 +182,95 @@ if (writeHtml) {
                 cat(plottxt, file=paste0(writePlotDir,"/plots_hydro.Rmd"), append=TRUE)
                 cat('```\n', file=paste0(writePlotDir,"/plots_hydro.Rmd"), append=TRUE)
         }
+}
+}
+
+if (hydroEnsPlot) {
+message("Generating Ensemble hydrograph plots...")
+# Setup
+hydroList <- list()
+if (reachRting) {
+        if (is.null(hydroTags2)) hydroTags2 <- unique(modChrtout$tag)
+	if (is.null(hydroEnsTags)) hydroEnsTags <- unique(modChrtout$enstag)
+        if (exists("gageList")) {
+                gageNames <- unique(gageList$link)
+        } else {
+                gageNames <- unique(obsStrData$link)
+        }
+        idCol <- "link"
+	modDfsOut <- modChrtout
+} else {
+        if (is.null(hydroTags2)) hydroTags2 <- unique(modFrxstout$tag)
+        if (is.null(hydroEnsTags)) hydroEnsTags <- unique(modFrxstout$enstag)
+        gageNames <- names(gage2basinList)
+        idCol <- "site_no"
+	modDfsOut <- modFrxstout
+}
+
+# Loop over station gauges and create suite of ensemble plots
+for (i in 1:length(hydroTags2)) {
+        modelTag <- hydroTags2[i]
+        for (n in gageNames) {
+                if (!is.null(STRfile)) { # Make ensemble plots with observations
+        		if (idCol == "site_no") {
+                                siteId <- n
+                                plotTitle <- paste0("Streamflow: ", n, " Model: ", modelTag)
+                        } else if (idCol =="link") {
+                                siteId <- subset(rtLinks$site_no, rtLinks$link==n)
+                                plotTitle <- paste0("Streamflow: ", subset(rtLinks$site_no, rtLinks$link==n),
+                                        " (", obsStrMeta$site_name[obsStrMeta$site_no==subset(rtLinks$site_no, rtLinks$link==n)], ") ", "Model: ", modelTag)
+                        }
+                        obsFlag <- 1 	
+                } else { # Make ensemble plots with observationis
+        		if (idCol == "site_no") {
+                                siteId <- n
+                                plotTitle <- paste0("Streamflow: ", n, " Model: ", modelTag)
+                        } else if (idCol =="link") {
+                                siteId <- subset(rtLinks$site_no, rtLinks$link==n)
+                                plotTitle <- paste0("Streamflow: ", subset(rtLinks$site_no, rtLinks$link==n),
+                                        " (", n, ") ", "Model: ", modelTag)
+                        }
+                        obsFlag <- 0 
+                }
+		# Make suit of plots
+		if (obsFlag == 1){
+			plotEnsFlowWObs(n, modDfs=modDfsOut,
+		      		        obs=ObsStrData,
+			    	        labObs="Observed",
+			    	        title=plotTitle,
+			    	        startDate=hydroEnsStartDate,
+			    	        endDate=hydroEnsEndDate,
+			    	        outDir=writePlotDir)
+				dev.off()
+		} else {
+			plotEnsFlow(n, modDfs=modDfsOut,
+                                    title=plotTitle,
+                                    startDate=hydroEnsStartDate,
+                                    endDate=hydroEnsEndDate,
+                                    outDir=writePlotDir)
+                        dev.off()
+		}
+        }
+}
+}
+
+# Ensemble basin SWE volume plots
+if (basSnoEnsPlot) {
+message("Generating basin SWE volume ensemble plots...")
+modTags <- unique(modLdasout$native$tag)
+basins <- unique(modLdasout$native$statArg)
+for (i in 1:length(modTags)) {
+	modelTag <- modTags[i]
+	for (n in basins) {
+		# Make plots
+		plotTitle <- paste0("Basin: ",n," Model: ",modelTag)
+		plotEnsSWE(n, modDfs=modLdasout$native,
+			   title=plotTitle,
+			   stDate=basSnowEnsStartDate,
+			   endDate=basSnowEnsEndDate,
+			   outDir=writePlotDir)
+		dev.off()
+	}   
 }
 }
 
@@ -413,7 +504,6 @@ if (metPlot) {
 		modLdasin_MET_TAG <- subset(modLdasin_MET, modLdasin_MET$tag==i)
 		# Loop Sites
 		for (n in metSites) {
-  			print(n)
   			# Temperature
   			png(paste0(writePlotDir, "/met_temp_", i, "_", n, ".png"), width=1350, height=2100, res=225)
   			PlotMet(obs=obsMetData.dy,
@@ -492,6 +582,138 @@ if (metPlot) {
   			dev.off()
 		}
 	}
+}
+
+# Snow Basin Plots of Modeled vs SNODAS
+if (snowBasinPlot) {
+	library(ggplot2)
+	library(reshape)
+        library(scales)
+
+	# Get number of basins to plot
+	nBas <- length(mskgeo.nameList)
+
+        # Convert POSIXct objects to Date objects as that's what they are in the Rdata set
+        bDate <- as.Date(snowBasStartDate)
+        eDate <- as.Date(snowBasEndDate)
+
+	# Esablish date strings
+        bDStr <- strftime(bDate,format="%Y%m%d")
+	eDStr <- strftime(eDate,format="%Y%m%d")
+
+	# Loop through basins
+	for (n in 1:nBas) {
+		bName <- mskgeo.nameList[[n]]
+		#Total snow covered area
+       		snowVarSub1 <- subset(snowBasinData,Basin == bName,select=c(Basin,Date,product,snow_area_km))
+                snowVarSub2 <- subset(snowVarSub1,(Date >= bDate & Date <= eDate),select=c(Basin,Date,product,snow_area_km))
+                pngFile <- paste0(writePlotDir,"/snow_area_km_",bDStr,"_",eDStr,"_",bName,".png")
+		PlotBasSnoMetrics(n, modDfs=snowVarSub2,
+				     var=1,
+				     title=paste0("Region Area Covered by Snow (km^2) for Region: ",
+				                  bName),
+				     ylab="km^2",
+			             xlab="Date",
+				     fileOut=pngFile)
+		dev.off()
+
+		#Fraction of basin covered by snow
+		snowVarSub1 <- subset(snowBasinData,Basin == bName,select=c(Basin,Date,product,snow_cover_fraction))
+                snowVarSub2 <- subset(snowVarSub1,(Date >= bDate & Date <= eDate),select=c(Basin,Date,product,snow_cover_fraction))
+		pngFile <- paste0(writePlotDir,"/snow_cover_fraction_",bDStr,"_",eDStr,"_",bName,".png")
+		PlotBasSnoMetrics(n, modDfs=snowVarSub2,
+                                     var=2,
+                                     title=paste0("Fraction of Region Covered by Snow for Region: ",
+                                                  bName),
+				     ylab="Fraction of Basin",
+                                     xlab="Date",
+				     fileOut=pngFile)
+		dev.off()
+
+		#Snow volume (cubic meters)
+		snowVarSub1 <- subset(snowBasinData,Basin == bName,select=c(Basin,Date,product,snow_volume_cub_meters))
+		snowVarSub2 <- subset(snowVarSub1,(Date >= bDate & Date <= eDate),select=c(Basin,Date,product,snow_volume_cub_meters))
+		pngFile <- paste0(writePlotDir,"/snow_vol_cub_meters_",bDStr,"_",eDStr,"_",bName,".png")
+		PlotBasSnoMetrics(n, modDfs=snowVarSub2,
+                                     var=3,
+                                     title=paste0("Basin SWE Volume (m^3) for Region: ",
+                                                  bName),
+				     ylab="m^3",
+                                     xlab="Date",
+				     fileOut=pngFile)
+		dev.off()
+
+		#Snow volume (acre feet)
+		snowVarSub1 <- subset(snowBasinData,Basin == bName,select=c(Basin,Date,product,snow_volume_acre_feet))
+		snowVarSub2 <- subset(snowVarSub1,(Date >= bDate & Date <= eDate),select=c(Basin,Date,product,snow_volume_acre_feet))
+		pngFile <- paste0(writePlotDir,"/snow_vol_af_",bDStr,"_",eDStr,"_",bName,".png")
+		PlotBasSnoMetrics(n, modDfs=snowVarSub2,
+                                     var=4,
+                                     title=paste0("Region SWE Volume (acre-feet) for Region: ",
+                                                  bName),
+				     ylab="acre-feet",
+                                     xlab="Date",
+				     fileOut=pngFile)
+		dev.off()
+
+		#Mean snow line (meters)
+		snowVarSub1 <- subset(snowBasinData,Basin == bName,select=c(Basin,Date,product,mean_snow_line_meters))
+		snowVarSub2 <- subset(snowVarSub1,(Date >= bDate & Date <= eDate),select=c(Basin,Date,product,mean_snow_line_meters))
+		pngFile <- paste0(writePlotDir,"/snow_line_meters_",bDStr,"_",eDStr,"_",bName,".png")
+		if (length(which(!is.na(snowVarSub2$mean_snow_line_meters))) > 0) { # Only plot if valid snow line present
+			PlotBasSnoMetrics(n, modDfs=snowVarSub2,
+                        	             var=5,
+                                 	      title=paste0("Mean Region Snow Line (meters) for Region: ",
+                               	                   bName),
+					     ylab="m",
+                               	             xlab="Date",
+					     fileOut=pngFile)
+			dev.off()
+		}
+
+		#Mean snow line (feet)
+		snowVarSub1 <- subset(snowBasinData,Basin == bName,select=c(Basin,Date,product,mean_snow_line_feet))
+		snowVarSub2 <- subset(snowVarSub1,(Date >= bDate & Date <= eDate),select=c(Basin,Date,product,mean_snow_line_feet))
+		pngFile <- paste0(writePlotDir,"/snow_line_feet_",bDStr,"_",eDStr,"_",bName,".png")
+		if (length(which(!is.na(snowVarSub2$mean_snow_line_feet))) > 0){
+			PlotBasSnoMetrics(n, modDfs=snowVarSub2,
+                        	             var=6,
+                                	     title=paste0("Mean Region Snow Line (feet) for Region: ",
+                                        	          bName),
+					     ylab="ft",
+                	                     xlab="Date",
+					     fileOut=pngFile)
+			dev.off()
+		}
+
+		#Mean SWE (mm)
+		snowVarSub1 <- subset(snowBasinData,Basin == bName,select=c(Basin,Date,product,mean_swe_mm))
+		snowVarSub2 <- subset(snowVarSub1,(Date >= bDate & Date <= eDate),select=c(Basin,Date,product,mean_swe_mm))
+		pngFile <- paste0(writePlotDir,"/mean_swe_mm_",bDStr,"_",eDStr,"_",bName,".png")
+		PlotBasSnoMetrics(n, modDfs=snowVarSub2,
+                                     var=7,
+                                     title=paste0("Mean SWE (mm) for Region: ",
+                                                  bName),
+				     ylab="mm",
+                                     xlab="Date",
+				     fileOut=pngFile)
+		dev.off()
+
+		#Max SWE (mm)
+		snowVarSub1 <- subset(snowBasinData,Basin == bName,select=c(Basin,Date,product,max_swe_mm))
+		snowVarSub2 <- subset(snowVarSub1,(Date >= bDate & Date <= eDate),select=c(Basin,Date,product,max_swe_mm))
+		pngFile <- paste0(writePlotDir,"/max_swe_mm_",bDStr,"_",eDStr,"_",bName,".png")
+		PlotBasSnoMetrics(n, modDfs=snowVarSub2,
+                                     var=8,
+                                     title=paste0("Maximum SWE (mm) for Region: ",
+                                                  bName),
+			             ylab="mm",
+                                     xlab="Date",
+                                     fileOut=pngFile)
+		dev.off()
+
+	}
+
 }
 
 # MAPS
@@ -757,9 +979,752 @@ if (snoprecipErrMap) {
         }
 }
 
+# Peak SWE Julian Day of Water Year
+if (peakSweMap) {
+	library(ggplot2)
+	library(ggmap)
+	library(ncdf4)
+	# Setup date ranges
+	yrPrev <- peakSweWY - 1
+	dStart <- as.POSIXct(paste0(toString(yrPrev),"-10-01"),"%Y-%m-%d",tz = "UTC")
+	dEnd <- as.POSIXct(paste0(toString(peakSweWY),"-09-01"),"%Y-%m-%d",tz = "UTC")
+	# Setup map
+	geoMap <- SetupMap(geoFile)
 
+	message("Generating Peak SWE map....")
+	# SNODAS First
+	PlotPeakSweMap(geoMap, dStart, dEnd, geoNX, geoNY)
+}
 
+# Map of model vs SNODAS gridded errors
+if (snodasErrorMap) {
 
+	library(ncdf4)
+
+	PlotSnodasGridMap(snowMapBegDate,snowMapEndDate,geoNX,geoNY)
+
+}
+
+# Plots of model vs obs vs SNODAS snow at points
+if (snowPointScatter) {
+	if (snotelScatter) {
+		# SNOTEL points
+		numPoints <- length(ptgeo.sno$id)
+		
+		modData <- modLdasout$utcday
+		# Determine number of model tags to analyze
+		tags <- unique(modData$tag)
+		numTags <- length(tags)
+ 
+		# Loop through points/tags and generate scatter plots
+		for (i in 1:numPoints){
+			pointId <- ptgeo.sno$id[i]
+
+			# Set a default maximum value for plotting purposes
+			maxSnow <- 500.0
+			for (j in 1:numTags){
+				tag <- tags[j]
+				
+				# model vs. obs scatter
+				ind <- which(modData$statArg == pointId & modData$tag == tag & modData$POSIXct >= snowScatterBegDate &
+					modData$POSIXct <= snowScatterEndDate)
+
+				modDates <- modData$POSIXct[ind]
+				modSNEQV <- modData$SNEQV_mean[ind]
+
+				if (j == 1){
+					maxSnow <- max(modSNEQV)
+				}
+				# Loop through found data and find corresponding SNOTEL and SNODAS data. Store in a temporary array for
+				# use in the creation of a scatter plot
+				numSteps <- length(ind)
+			
+				dateTmp <- c()
+				modTmp <- c()
+				obsTmp <- c()
+				snodasTmp <- c()
+	
+				for (k in 1:numSteps){
+					dateTmp2 <- modDates[k]
+					dfTmp$Month[k] <- as.numeric(strftime(dateTmp2,format="%m"))
+					dfTmp$Model[k] <- modSNEQV[k]
+
+					ind <- which(obsSnoData$POSIXct == dateTmp2 & obsSnoData$site_id == pointId)
+					dfTmp$SNOTEL[k] <- obsSnoData$SWE_mm[ind[1]]
+
+					ind <- which(snodasout$utcday$statArg == pointId & snodasout$utcday$POSIXct == dateTmp2)
+					dfTmp$SNODAS[k] <- snodasout$utcday$SNEQV[k]
+
+					dateTmp <- c(dateTmp2, as.numeric(strftime(dateTmp2,format="%m")))
+					modTmp <- c(modTmp, modSNEQV[k])
+					obsTmp <- c(obsTmp, obsSnoData$SWE_mm[ind[1]])
+					snodasTmp <- c(snodasTmp, snodasout$utcday$SNEQV[k])
+					
+				}
+
+				# Filter any NA values that may have snuck in
+				ind4 <- which(!is.na(modTmp) & !is.na(obsTmp) & !is.na(snodasTmp))
+				obsTmp <- obsTmp[ind4]
+				modTmp <- modTmp[ind4]
+				snodasTmp <- snodasTmp[ind4]
+				dateTmp <- dateTmp[ind4]
+
+				# Create data frame to hold data
+				dfTmp <- data.frame(matrix(NA, nrow=length(obsTmp), ncol=4))
+                                names(dfTmp) <- c("Month","Model","SNOTEL","SNODAS")
+				dfTmp$Month <- dateTmp
+				dfTmp$SNOTEL <- obsTmp
+				dfTmp$Model <- modTmp
+				dfTmp$SNODAS <- snodasTmp
+
+				# Reset numSteps in case any NA values were filtered out
+				numSteps <- length(obsTmp)
+
+				# Model vs. SNOTEL
+				pathOut <- paste0(writePlotDir,"/MODEL_SNOTEL_SCATTER_",pointId,"_",tag,"_",
+						strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+						strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+
+				title <- paste0('SNOTEL ',pointId,' ',tag,' vs. SNOTEL: ',
+						strftime(snowScatterEndDate,format="%Y"),' WY')
+				xlab <- 'SNOTEL SWE (mm)'
+				ylab <- 'Model SWE (mm)'
+
+				# Linear Regression Coefficient Calculations
+				lmOut <- lm(Model ~ SNOTEL, dfTmp)
+				slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                                icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+				cc <- format(round(cor(dfTmp$Model,dfTmp$SNOTEL),3),nsmall=2)
+
+				gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=SNOTEL,y=Model)) + ggplot2::geom_point(aes(colour = factor(Month)),size=5) +
+					ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+					theme(plot.title = element_text(size=20)) +
+					theme(axis.title.x = element_text(size=20)) + 
+					theme(axis.title.y = element_text(size=20)) +  
+					ggplot2::labs(colour="Month") + 
+					theme(legend.title = element_text(size=15)) + 
+					theme(legend.text = element_text(size=15)) + 
+					ggplot2::geom_abline(intercept = 0, slope = 1) + 
+					coord_cartesian(xlim = c(0, maxSnow),ylim = c(0,maxSnow)) +
+					annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+						colour="darkred", family="serif", fontface="italic", size = 7) +
+					annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) +
+					annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                                         colour="darkred", family="serif", fontface="italic", size = 7)
+				ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+				# Model vs. SNODAS
+				pathOut <- paste0(writePlotDir,"/MODEL_SNODAS_SCATTER_",pointId,"_",tag,"_",
+                                                strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                                                strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+
+				title <- paste0('SNOTEL ',pointId,' ',tag,' vs. SNODAS: ',
+                                                strftime(snowScatterEndDate,format="%Y"),' WY')
+				xlab <- 'SNODAS SWE (mm)'
+                                ylab <- 'Model SWE (mm)'
+
+				# Linear Regression Coefficient Calculations
+				lmOut <- lm(Model ~ SNODAS, dfTmp)
+				slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+				icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+				cc <- format(round(cor(dfTmp$Model,dfTmp$SNODAS),3),nsmall=2)
+
+                                gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=SNODAS,y=Model)) + ggplot2::geom_point(aes(colour = factor(Month)),size=5) +
+					ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) + 
+					theme(plot.title = element_text(size=20)) +
+					theme(axis.title.x = element_text(size=20)) +
+                                        theme(axis.title.y = element_text(size=20)) +
+					ggplot2::labs(colour="Month") +
+					theme(legend.title = element_text(size=15)) +
+                                        theme(legend.text = element_text(size=15)) +
+					ggplot2::geom_abline(intercept = 0, slope = 1) + 
+					coord_cartesian(xlim = c(0, maxSnow),ylim = c(0, maxSnow)) +
+                                	annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) +
+                                        annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) + 
+					annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                                         colour="darkred", family="serif", fontface="italic", size = 7)
+				ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+			        # SNODAS vs. SNOTEL
+                                pathOut <- paste0(writePlotDir,"/SNODAS_SNOTEL_SCATTER_",pointId,"_",tag,"_",
+                                                strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                                                strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+
+				title <- paste0('SNOTEL ',pointId,' ',' vs. SNOTEL : ',
+                                                strftime(snowScatterEndDate,format="%Y"),' WY')
+				xlab <- 'SNOTEL SWE (mm)'
+                                ylab <- 'SNODAS SWE (mm)'
+
+				# Linear Regression Coefficient Calculations
+				lmOUt <- lm(SNODAS ~ SNOTEL, dfTmp)
+				slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                                icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+				cc <- format(round(cor(dfTmp$SNODAS, dfTmp$SNOTEL),3),nsmall=2)
+
+                                gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=SNOTEL,y=SNODAS)) + ggplot2::geom_point(aes(colour = factor(Month)),size=5) +
+					ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+					theme(plot.title = element_text(size=20)) +
+					theme(axis.title.x = element_text(size=20)) +
+                                        theme(axis.title.y = element_text(size=20)) +
+					ggplot2::labs(colour="Month") +
+					theme(legend.title = element_text(size=15)) +
+                                        theme(legend.text = element_text(size=15)) +
+					ggplot2::geom_abline(intercept = 0, slope = 1) + 
+					coord_cartesian(xlim = c(0, maxSnow),ylim = c(0,maxSnow)) + 
+                                	annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) +
+                                        annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) + 
+					annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                                         colour="darkred", family="serif", fontface="italic", size = 7)
+				ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+	
+				rm(dfTmp)
+
+			}
+		}
+	}
+	# MET points
+	if (metScatter) {
+		# MET points
+		numPoints <- length(ptgeo.met$id)
+		
+		modData <- modLdasout$utcday
+                # Determine number of model tags to analyze
+                tags <- unique(modData$tag)
+                numTags <- length(tags)
+
+		# Establish temporary arrays to hold data for aggegation plots
+                obsTmp <- c()
+                modTmp <- c()
+                snodasTmp <- c()
+                dateTmp2 <- c()
+		tagTmp <- c()
+                # Loop through points/tags and generate scatter plots
+                for (i in 1:numPoints){
+                        pointId <- ptgeo.met$id[i]
+
+			# Set a default maximum value for plotting purposes
+                        maxSnow <- 1000.0
+                        for (j in 1:numTags){
+                                tag <- tags[j]
+
+                                # model vs. obs scatter
+				ind <- which(obsMetData.dy$site_id == pointId & obsMetData.dy$POSIXct >= snowScatterBegDate &
+					obsMetData.dy$POSIXct <= snowScatterEndDate & 
+					!is.nan(obsMetData.dy$SnoDep_mean))
+				obsDates <- obsMetData.dy$POSIXct[ind]
+				obsSNOWH <- obsMetData.dy$SnoDep_mean[ind]
+
+                                if (j == 1){
+                                        maxSnow <- max(obsSNOWH)
+                                }
+                                # Loop through found data and find corresponding model and SNODAS data. Store in a temporary array for
+                                # use in the creation of a scatter plot
+                                numSteps <- length(ind)
+
+				dfTmp <- data.frame(matrix(NA, nrow=numSteps, ncol=4))
+                                names(dfTmp) <- c("Month","Model","HydroMet","SNODAS")
+
+                                dfTmp$Month <- NA
+                                dfTmp$Model <- NA
+                                dfTmp$HydroMet <- NA
+                                dfTmp$SNODAS <- NA
+                                for (k in 1:numSteps){
+                                        dateTmp <- obsDates[k]
+                                        dfTmp$Month[k] <- as.numeric(strftime(dateTmp,format="%m"))
+					dfTmp$HydroMet[k] <- obsSNOWH[k]
+
+					ind <- which(modData$statArg == pointId & modData$tag == tag & 
+						modData$POSIXct == dateTmp)
+					dfTmp$Model[k] <- modData$SNOWH_mean[ind[1]]*1000.0
+
+                                        ind2 <- which(snodasout$utcday$statArg == pointId & snodasout$utcday$POSIXct == dateTmp)
+                                        dfTmp$SNODAS[k] <- snodasout$utcday$SNOWH[ind2[1]]
+
+					#Store data to temporary arrays
+					obsTmp <- c(obsTmp, dfTmp$HydroMet[k])
+					modTmp <- c(modTmp, dfTmp$Model[k])
+					snodasTmp <- c(snodasTmp, dfTmp$SNODAS[k])
+					dateTmp2 <- c(dateTmp2, as.numeric(strftime(dateTmp,format="%m")))
+					tagTmp <- c(tagTmp, j)
+                                }
+
+				ind4 <- which(!is.na(obsTmp) & !is.na(modTmp) & !is.na(snodasTmp))
+				obsTmp <- obsTmp[ind4]
+				modTmp <- modTmp[ind4]
+				snodasTmp <- snodasTmp[ind4]
+				dateTmp2 <- dateTmp2[ind4]
+				tagTmp <- tagTmp[ind4]
+
+				# Model vs. HydroMet
+                                pathOut <- paste0(writePlotDir,"/MODEL_MET_SCATTER_",pointId,"_",tag,"_",
+                                                strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                                                strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+
+                                title <- paste0('HydroMet ',pointId,' ',tag,' vs. HydroMet: ',
+                                                strftime(snowScatterEndDate,format="%Y"),' WY')
+                                xlab <- 'HydroMet Snow Depth (mm)'
+                                ylab <- 'Model Snow Depth (mm)'
+
+				# Linear Regression Coefficient Calculations
+				lmOut <- lm(Model ~ HydroMet, dfTmp)
+                                slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                                icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+				cc <- format(round(cor(dfTmp$Model, dfTmp$HydroMet),3),nsmall=2)
+
+                                gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=HydroMet,y=Model)) + ggplot2::geom_point(aes(colour = factor(Month)),size=5) +
+                                        ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+					theme(plot.title = element_text(size=20)) +
+                                        theme(axis.title.x = element_text(size=20)) +
+                                        theme(axis.title.y = element_text(size=20)) +
+                                        ggplot2::labs(colour="Month") +
+					theme(legend.title = element_text(size=15)) +
+                                        theme(legend.text = element_text(size=15)) +
+                                        ggplot2::geom_abline(intercept = 0, slope = 1) +
+                                        coord_cartesian(xlim = c(0, maxSnow),ylim = c(0,maxSnow)) +
+                                        annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) +
+                                        annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) +
+					annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                                         colour="darkred", family="serif", fontface="italic", size = 7)
+                                ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+				# Model vs. SNODAS
+                                pathOut <- paste0(writePlotDir,"/MODEL_SNODAS_SCATTER_",pointId,"_",tag,"_",
+                                                strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                                                strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+
+                                title <- paste0('HydroMet ',pointId,' ',tag,' vs. SNODAS: ',
+                                                strftime(snowScatterEndDate,format="%Y"),' WY')
+                                xlab <- 'SNODAS Snow Depth (mm)'
+                                ylab <- 'Model Snow Depth (mm)'
+
+                                # Linear Regression Coefficient Calculations
+				lmOut <- lm(Model ~ SNODAS, dfTmp)
+                                slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                                icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+				cc <- format(round(cor(dfTmp$Model, dfTmp$SNODAS),3),nsmall=2)
+
+                                gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=SNODAS,y=Model)) + ggplot2::geom_point(aes(colour = factor(Month)),size=5) +
+                                        ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+					theme(plot.title = element_text(size=20)) +
+                                        theme(axis.title.x = element_text(size=20)) +
+                                        theme(axis.title.y = element_text(size=20)) +
+                                        ggplot2::labs(colour="Month") +
+					theme(legend.title = element_text(size=15)) +
+                                        theme(legend.text = element_text(size=15)) +
+                                        ggplot2::geom_abline(intercept = 0, slope = 1) +
+                                        coord_cartesian(xlim = c(0, maxSnow),ylim = c(0, maxSnow)) +
+                                        annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) +
+                                        annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) + 
+					annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                                         colour="darkred", family="serif", fontface="italic", size = 7)
+                                ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+				# SNODAS vs. HydroMet
+                                pathOut <- paste0(writePlotDir,"/SNODAS_MET_SCATTER_",pointId,"_",tag,"_",
+                                                strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                                                strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+
+                                title <- paste0('HydroMet ',pointId,' ',' vs. SNODAS: ',
+                                                strftime(snowScatterEndDate,format="%Y"),' WY')
+                                xlab <- 'HydroMet Snow Depth (mm)'
+                                ylab <- 'SNODAS Snow Depth (mm)'
+
+                                # Linear Regression Coefficient Calculations
+				lmOut <- lm(SNODAS ~ HydroMet, dfTmp)
+                                slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                                icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+				cc <- format(round(cor(dfTmp$SNODAS, dfTmp$HydroMet),3),nsmall=2)
+
+                                gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=HydroMet,y=SNODAS)) + ggplot2::geom_point(aes(colour = factor(Month)),size=5) +
+                                        ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+					theme(plot.title = element_text(size=20)) +
+                                        theme(axis.title.x = element_text(size=20)) +
+                                        theme(axis.title.y = element_text(size=20)) +
+                                        ggplot2::labs(colour="Month") +
+					theme(legend.title = element_text(size=15)) +
+                                        theme(legend.text = element_text(size=15)) +
+                                        ggplot2::geom_abline(intercept = 0, slope = 1) +
+                                        coord_cartesian(xlim = c(0, maxSnow),ylim = c(0,maxSnow)) +
+                                        annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) +
+                                        annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                                colour="darkred", family="serif", fontface="italic", size = 7) +
+					annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                                         colour="darkred", family="serif", fontface="italic", size = 7)
+                                ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+                                rm(dfTmp)
+
+			} # Done with model groups
+		} # Done looping through observation points
+
+		# Create aggregated scatter plots based on temporary arrays.
+		for (i in 1:numTags) {
+			indTmp <- which(tagTmp == i)
+			maxSnow <- 1250.0
+
+			tag <- tags[i]
+			# Create scatter plots of aggregated observations/model/SNODAS
+			numAll <- length(indTmp)
+			dfTmp <- data.frame(matrix(NA, nrow=numAll, ncol=4))
+                        names(dfTmp) <- c("Month","Model","Observation","SNODAS")
+                        dfTmp$Month <- dateTmp2[indTmp]
+                        dfTmp$Model <- modTmp[indTmp]
+                        dfTmp$Observation <- obsTmp[indTmp]
+                        dfTmp$SNODAS <- snodasTmp[indTmp]
+
+			# Plot model vs. observations
+                        pathOut <- paste0(writePlotDir,"/MODEL_MET_SCATTER_",tag,"_",
+                        	strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                        	strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+                        title <- paste0(tag,' vs. Hydro-Met: ',
+                        strftime(snowScatterEndDate,format="%Y"),' WY')
+                        xlab <- 'Hydro-Met Snow Depth (mm)'
+                        ylab <- 'Model Snow Depth (mm)'
+	
+			# Linear Regression Coefficient Calculations
+			lmOut <- lm(Model ~ Observation, dfTmp)
+                        slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                        icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+                        cc <- format(round(cor(dfTmp$Observation,dfTmp$Model),3),nsmall=3)
+
+                        gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=Observation,y=Model)) + ggplot2::geom_point(aes(colour = factor(Month)),size=5) +
+                                ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+                                theme(plot.title = element_text(size=20)) +
+                                theme(axis.title.x = element_text(size=20)) +
+                                theme(axis.title.y = element_text(size=20)) +
+                                ggplot2::labs(colour="Month") +
+                                theme(legend.title = element_text(size=15)) +
+                                theme(legend.text = element_text(size=15)) +
+                                ggplot2::geom_abline(intercept = 0, slope = 1) +
+                                coord_cartesian(xlim = c(0, maxSnow),ylim = c(0,maxSnow)) +
+                                annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                         colour="darkred", family="serif", fontface="italic", size = 7) +
+                                annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                         colour="darkred", family="serif", fontface="italic", size = 7) +
+                                annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                         colour="darkred", family="serif", fontface="italic", size = 7)
+                        ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+			# Plot model vs. SNOTEL
+			pathOut <- paste0(writePlotDir,"/MODEL_SNODAS_MET_SCATTER_",tag,"_",
+                                strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                                strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+                        title <- paste0(tag,' vs. SNODAS at Hydro-Met Stations: ',
+                        strftime(snowScatterEndDate,format="%Y"),' WY')
+                        xlab <- 'SNODAS Snow Depth (mm)'
+                        ylab <- 'Model Snow Depth (mm)'
+
+                        # Linear Regression Coefficient Calculations
+			lmOut <- lm(Model ~ SNODAS, dfTmp)
+                        slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                        icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+                        cc <- format(round(cor(dfTmp$SNODAS,dfTmp$Model),3),nsmall=3)
+
+                        gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=SNODAS,y=Model)) + ggplot2::geom_point(aes(colour = factor(Month)),size=5) +
+                                ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+                                theme(plot.title = element_text(size=20)) +
+                                theme(axis.title.x = element_text(size=20)) +
+                                theme(axis.title.y = element_text(size=20)) +
+                                ggplot2::labs(colour="Month") +
+                                theme(legend.title = element_text(size=15)) +
+                                theme(legend.text = element_text(size=15)) +
+                                ggplot2::geom_abline(intercept = 0, slope = 1) +
+                                coord_cartesian(xlim = c(0, maxSnow),ylim = c(0,maxSnow)) +
+                                annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                         colour="darkred", family="serif", fontface="italic", size = 7) +
+                                annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                         colour="darkred", family="serif", fontface="italic", size = 7) +
+                                annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                         colour="darkred", family="serif", fontface="italic", size = 7)
+                        ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+			# Plot Hydro-Met vs. SNODAS
+			pathOut <- paste0(writePlotDir,"/SNODAS_MET_SCATTER_",tag,"_",
+                                strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                                strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+                        title <- paste0('SNODAS vs. Hydro-Met: ',
+                        strftime(snowScatterEndDate,format="%Y"),' WY')
+                        xlab <- 'Hydro-Met Snow Depth (mm)'
+                        ylab <- 'SNODAS Snow Depth (mm)'
+
+                        # Linear Regression Coefficient Calculations
+			lmOut <- lm(SNODAS ~ Observation, dfTmp)
+                        slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                        icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+                        cc <- format(round(cor(dfTmp$Observation,dfTmp$SNODAS),3),nsmall=3)
+
+                        gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=Observation,y=SNODAS)) + ggplot2::geom_point(aes(colour = factor(Month)),size=5) +
+                                ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+                                theme(plot.title = element_text(size=20)) +
+                                theme(axis.title.x = element_text(size=20)) +
+                                theme(axis.title.y = element_text(size=20)) +
+                                ggplot2::labs(colour="Month") +
+                                theme(legend.title = element_text(size=15)) +
+                                theme(legend.text = element_text(size=15)) +
+                                ggplot2::geom_abline(intercept = 0, slope = 1) +
+                                coord_cartesian(xlim = c(0, maxSnow),ylim = c(0,maxSnow)) +
+                                annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                         colour="darkred", family="serif", fontface="italic", size = 7) +
+                                annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                         colour="darkred", family="serif", fontface="italic", size = 7) +
+                                annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                         colour="darkred", family="serif", fontface="italic", size = 7)
+                        ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+			rm(dfTmp)
+
+		}
+	} # Done with hydro-met scatter plots
+	# If performing over basin, number of basins
+        # Aggregate point analysis to basin (region) scale based on mask file.
+	if (basinScatter) {
+		numBas <- length(mskgeo.nameList)
+
+		if (snotelScatter) {
+			numPoints <- length(ptgeo.sno$id)
+                }
+		if (metScatter) {
+			numPoints <- length(ptgeo.met$id)
+		}
+
+		modData <- modLdasout$utcday
+                # Determine number of model tags to analyze
+                tags <- unique(modData$tag)
+                numTags <- length(tags)
+
+		for (i in 1:numBas) {
+			basId <- mskgeo.nameList[[i]]
+			maxSnow <- 500.0
+
+			for (j in 1:numTags){
+				tag <- tags[j]
+
+				# Establish temporary arrays to hold data
+				obsTmp <- c()
+				modTmp <- c()
+				snodasTmp <- c()
+				dateTmp <- c()
+				# Loop through observation points
+				# If region tag is true, calculate aggregate statistics
+				for (k in 1:numPoints) {
+					if (snotelScatter) {
+						pointId <- ptgeo.sno$id[k]
+						regionTagList <- ptgeo.sno$region[[k]]
+					}
+					if (metScatter) {
+						pointId <- ptgeo.met$id[k]
+						regionTagList <- ptgeo.met$region[[k]]
+					}
+
+					print(pointId)
+					indTmp <- which(names(regionTagList) == basId)
+					if (regionTagList[[indTmp]]) { # Observation data is within this region
+						if (snotelScatter) {
+							ind <- which(obsSnoData$site_id == pointId & obsSnoData$POSIXct >= snowScatterBegDate &
+                                        			obsSnoData$POSIXct <= snowScatterEndDate &
+							obsDates <- obsSnoData$POSIXct[ind]
+							obsSNOW <- obsSnoData$SWE_mm[ind]
+						}
+						if (metScatter) {
+							ind <- which(obsMetData.dy$site_id == pointId & obsMetData.dy$POSIXct >= snowScatterBegDate &
+                                        		obsMetData.dy$POSIXct <= snowScatterEndDate &
+							obsDates <- obsMetData.dy$POSIXct[ind]
+                                			obsSNOW <- obsMetData.dy$SnoDep_mean[ind]
+						}
+
+						numSteps <- length(ind)
+						if (numSteps > 0){
+							for (m in 1:numSteps){
+								tmpDate <- obsDates[m]
+								tmpDate2 <- as.numeric(strftime(tmpDate,format="%m"))
+								tmpObs <- obsSNOW[m]
+								ind2 <- which(modData$statArg == pointId & modData$tag == tag &
+										modData$POSIXct == tmpDate)
+								if (snotelScatter) {
+									tmpMod <- modData$SNEQV_mean[ind2[1]]
+								}
+								if (metScatter) {
+									tmpMod <- modData$SNOWH_mean[ind2]
+								}
+
+								ind3 <- which(snodasout$utcday$statArg == pointId & snodasout$utcday$POSIXct == tmpDate)
+								if (snotelScatter) {
+									tmpSnodas <- snodasout$utcday$SNEQV[ind3[1]]
+								}
+								if (metScatter) {
+									tmpSnodas <- snodasout$utcday$SNOWH[ind3]
+								}
+
+								obsTmp <- c(obsTmp, tmpObs)
+								modTmp <- c(modTmp, tmpMod)
+								snodasTmp <- c(snodasTmp, tmpSnodas)
+								dateTmp <- c(dateTmp, tmpDate2)
+							} # Done looping through time steps in model
+							# Filter out NA values that may have snuck in
+							ind4 <- which(!is.na(obsTmp) & !is.na(modTmp) & !is.na(snodasTmp))
+							obsTmp <- obsTmp[ind4]
+							modTmp <- modTmp[ind4]
+							snodasTmp <- snodasTmp[ind4]
+							dateTmp <- dateTmp[ind4]
+						} # Done with checking for numSteps > 0
+					} # Done with region TRUE/FALSE check
+
+				} # Done looping through observation points
+
+				# Create output data frame based on size of points found within basin.
+				if (length(obsTmp) > 0) {
+					numAll <- length(obsTmp)
+					dfTmp <- data.frame(matrix(NA, nrow=numAll, ncol=4))
+					names(dfTmp) <- c("Month","Model","Observation","SNODAS")
+					dfTmp$Month <- dateTmp
+					dfTmp$Model <- modTmp
+					dfTmp$Observation <- obsTmp
+					dfTmp$SNODAS <- snodasTmp
+
+					if (j == 1){
+						maxSnow <- max(obsTmp)
+					}
+
+					# Plot model vs. observations
+					pathOut <- paste0(writePlotDir,"/MODEL_OBS_SCATTER_",basId,"_",tag,"_",
+							strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                                                	strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+					if (snotelScatter) {
+						title <- paste0(basId,' ',tag,' vs. SNOTEL: ',
+                                                	strftime(snowScatterEndDate,format="%Y"),' WY')
+                                		xlab <- 'SNOTEL SWE (mm)'
+                                		ylab <- 'Model SWE (mm)'
+					}
+					if (metScatter) {
+						title <- paste0('HydroMet ',basId,' ',tag,' vs. HydroMet:: ',
+                                               	strftime(snowScatterEndDate,format="%Y"),' WY')
+                                		xlab <- 'HydroMet Snow Depth (mm)'
+                                		ylab <- 'Model Snow Depth (mm)'
+					}
+
+                                	# Linear Regression Coefficient Calculations
+					lmOut <- lm(Model ~ Observation, dfTmp)
+                                	slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                                	icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+					cc <- format(round(cor(dfTmp$Observation,dfTmp$Model),3),nsmall=3)
+
+                                	gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=Observation,y=Model)) + ggplot2::geom_point(aes(colour = factor(Month)),size=2) +
+                                        	ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+                                        	theme(plot.title = element_text(size=20)) +
+                                        	theme(axis.title.x = element_text(size=20)) +
+                                        	theme(axis.title.y = element_text(size=20)) +
+                                        	ggplot2::labs(colour="Month") +
+                                        	theme(legend.title = element_text(size=15)) +
+                                        	theme(legend.text = element_text(size=15)) +
+                                        	ggplot2::geom_abline(intercept = 0, slope = 1) +
+                                        	coord_cartesian(xlim = c(0, maxSnow),ylim = c(0,maxSnow)) +
+                                        	annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                                	colour="darkred", family="serif", fontface="italic", size = 7) +
+                                        	annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                                	colour="darkred", family="serif", fontface="italic", size = 7) + 
+						annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                                        colour="darkred", family="serif", fontface="italic", size = 7)
+                                	ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+					 # Plot model vs. SNODAS
+                                        pathOut <- paste0(writePlotDir,"/MODEL_SNODAS_SCATTER_",basId,"_",tag,"_",
+                                                        strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                                                        strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+                                        if (snotelScatter) {
+                                                title <- paste0(basId,' ',tag,' vs. SNODAS: ',
+                                                        strftime(snowScatterEndDate,format="%Y"),' WY')
+                                                xlab <- 'SNODAS SWE (mm)'
+                                                ylab <- 'Model SWE (mm)'
+                                        }
+                                        if (metScatter) {
+                                               title <- paste0('HydroMet ',basId,' ',tag,' vs. SNODAS:: ',
+                                                       strftime(snowScatterEndDate,format="%Y"),' WY')
+                                               xlab <- 'SNODAS Snow Depth (mm)'
+                                               ylab <- 'Model Snow Depth (mm)'
+                                        }
+
+                                        # Linear Regression Coefficient Calculations
+					lmOut <- lm(Model ~ SNODAS, dfTmp)
+                                        slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                                        icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+					cc <- format(round(cor(dfTmp$SNODAS,dfTmp$Model),3),nsmall=3)
+
+                                        gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=SNODAS,y=Model)) + ggplot2::geom_point(aes(colour = factor(Month)),size=2) +
+                                                ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+                                                theme(plot.title = element_text(size=20)) +
+                                                theme(axis.title.x = element_text(size=20)) +
+                                                theme(axis.title.y = element_text(size=20)) +
+                                                ggplot2::labs(colour="Month") +
+                                                theme(legend.title = element_text(size=15)) +
+                                                theme(legend.text = element_text(size=15)) +
+                                                ggplot2::geom_abline(intercept = 0, slope = 1) +
+                                                coord_cartesian(xlim = c(0, maxSnow),ylim = c(0,maxSnow)) +
+                                                annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                                        colour="darkred", family="serif", fontface="italic", size = 7) +
+                                                annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                                        colour="darkred", family="serif", fontface="italic", size = 7) + 
+						annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+                                                        colour="darkred", family="serif", fontface="italic", size = 7)
+                                        ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+					# Plot SNODAS vs. Observation
+                                        pathOut <- paste0(writePlotDir,"/SNODAS_OBSERVATION_SCATTER_",basId,"_",tag,"_",
+                                                        strftime(snowScatterBegDate,format="%Y%m%d"),"_",
+                                                        strftime(snowScatterEndDate,format="%Y%m%d"),".png")
+                                        if (snotelScatter) {
+                                                title <- paste0('SNOTEL ',basId,' vs. SNODAS: ',
+                                                        strftime(snowScatterEndDate,format="%Y"),' WY')
+                                                xlab <- 'SNOTEL SWE (mm)'
+                                                ylab <- 'SNODAS SWE (mm)'
+                                        }
+                                        if (metScatter) {
+                                               title <- paste0('HydroMet ',basId,' vs. SNODAS:: ',
+                                                       strftime(snowScatterEndDate,format="%Y"),' WY')
+                                               xlab <- 'HydroMet Snow Depth (mm)'
+                                               ylab <- 'SNODAS Snow Depth (mm)'
+                                        }
+
+                                        # Linear Regression Coefficient Calculations
+					lmOut <- lm(SNODAS ~ Observation, dfTmp)
+                                        slope <- format(round(lmOut$coefficients[[2]],2),nsmall=2)
+                                        icpt <- format(round(lmOut$coefficients[[1]],2),nsmall=2)
+					cc <- format(round(cor(dfTmp$Observation,dfTmp$SNODAS),3),nsmall=3)
+
+                                        gg <- ggplot2::ggplot(dfTmp,ggplot2::aes(x=Observation,y=SNODAS)) + ggplot2::geom_point(aes(colour = factor(Month)),size=2) +
+                                                ggplot2::ggtitle(title) + ggplot2::xlab(xlab) + ggplot2::ylab(ylab) +
+                                                theme(plot.title = element_text(size=20)) +
+                                                theme(axis.title.x = element_text(size=20)) +
+                                                theme(axis.title.y = element_text(size=20)) +
+                                                ggplot2::labs(colour="Month") +
+                                                theme(legend.title = element_text(size=15)) +
+                                                theme(legend.text = element_text(size=15)) +
+                                                ggplot2::geom_abline(intercept = 0, slope = 1) +
+                                                coord_cartesian(xlim = c(0, maxSnow),ylim = c(0,maxSnow)) +
+                                                annotate("text", x= (0.8*maxSnow), y = (0.3*maxSnow), label = paste0("Slope: ",toString(slope)),
+                                                        colour="darkred", family="serif", fontface="italic", size = 7) +
+                                                annotate("text", x= (0.8*maxSnow), y = (0.2*maxSnow), label = paste0("Intercept: ",toString(icpt)),
+                                                        colour="darkred", family="serif", fontface="italic", size = 7) + 
+						annotate("text", x= (0.8*maxSnow), y = (0.1*maxSnow), label = paste0("Correlation: ",toString(cc)),
+							colour="darkred", family="serif", fontface="italic", size = 7)
+                                        ggplot2::ggsave(filename=pathOut,plot=gg, units="in", width=8, height=6, dpi=100)
+
+				} # Done checking if data was found within basin
+			} # Done looping through model groups 
+		} # Done looping through basins
+	} # Done basin scatter plots
+	
+
+}
 # Output HTML
 if (writeHtml) {
 	if (accflowPlot | hydroPlot | flowlsmPlot) {
